@@ -148,6 +148,11 @@ set(ORTHANC_SERVER_SOURCES
   OrthancServer/ServerToolbox.cpp
   OrthancServer/OrthancFindRequestHandler.cpp
   OrthancServer/OrthancMoveRequestHandler.cpp
+
+  # From "lua-scripting" branch
+  OrthancServer/Scheduler/ServerFilterInstance.cpp
+  OrthancServer/Scheduler/ServerJob.cpp
+  OrthancServer/Scheduler/ServerScheduler.cpp
   )
 
 

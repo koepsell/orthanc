@@ -32,8 +32,9 @@
 
 #include "PrecompiledHeadersUnitTests.h"
 #include "gtest/gtest.h"
-
 #include <glog/logging.h>
+
+#include "../OrthancServer/Scheduler/ServerScheduler.h"
 
 #include "../Core/OrthancException.h"
 #include "../Core/Toolbox.h"
@@ -248,8 +249,6 @@ TEST(MultiThreading, ReaderWriterLock)
 
 
 
-
-
 #include "../OrthancServer/DicomProtocol/ReusableDicomUserConnection.h"
 
 TEST(ReusableDicomUserConnection, DISABLED_Basic)
@@ -257,6 +256,7 @@ TEST(ReusableDicomUserConnection, DISABLED_Basic)
   ReusableDicomUserConnection c;
   c.SetMillisecondsBeforeClose(200);
   printf("START\n"); fflush(stdout);
+
   {
     ReusableDicomUserConnection::Locker lock(c, "STORESCP", "localhost", 2000, ModalityManufacturer_Generic);
     lock.GetConnection().StoreFile("/home/jodogne/DICOM/Cardiac/MR.X.1.2.276.0.7230010.3.1.4.2831157719.2256.1336386844.676281");
@@ -273,4 +273,111 @@ TEST(ReusableDicomUserConnection, DISABLED_Basic)
 
   Toolbox::ServerBarrier();
   printf("DONE\n"); fflush(stdout);
+}
+
+
+
+class Tutu : public IServerFilter
+{
+private:
+  int factor_;
+
+public:
+  Tutu(int f) : factor_(f)
+  {
+  }
+
+  virtual bool Apply(ListOfStrings& outputs,
+                     const ListOfStrings& inputs)
+  {
+    for (ListOfStrings::const_iterator 
+           it = inputs.begin(); it != inputs.end(); it++)
+    {
+      int a = boost::lexical_cast<int>(*it);
+      int b = factor_ * a;
+
+      printf("%d * %d = %d\n", a, factor_, b);
+
+      //if (a == 84) { printf("BREAK\n"); return false; }
+
+      outputs.push_back(boost::lexical_cast<std::string>(b));
+    }
+
+    Toolbox::USleep(1000000);
+
+    return true;
+  }
+
+  virtual bool SendOutputsToSink() const
+  {
+    return true;
+  }
+};
+
+
+static void Tata(ServerScheduler* s, ServerJob* j, bool* done)
+{
+  typedef IServerFilter::ListOfStrings  ListOfStrings;
+
+#if 1
+  while (!(*done))
+  {
+    ListOfStrings l;
+    s->GetListOfJobs(l);
+    for (ListOfStrings::iterator i = l.begin(); i != l.end(); i++)
+      printf(">> %s: %0.1f\n", i->c_str(), 100.0f * s->GetProgress(*i));
+    Toolbox::USleep(100000);
+  }
+#else
+  ListOfStrings l;
+  s->GetListOfJobs(l);
+  for (ListOfStrings::iterator i = l.begin(); i != l.end(); i++)
+    printf(">> %s\n", i->c_str());
+  Toolbox::USleep(1500000);
+  s->Cancel(*j);
+  Toolbox::USleep(1000000);
+  s->GetListOfJobs(l);
+  for (ListOfStrings::iterator i = l.begin(); i != l.end(); i++)
+    printf(">> %s\n", i->c_str());
+#endif
+}
+
+
+TEST(Toto, Toto)
+{
+  ServerScheduler scheduler;
+
+  ServerJob job;
+  ServerFilterInstance& f2 = job.AddFilter(new Tutu(2));
+  ServerFilterInstance& f3 = job.AddFilter(new Tutu(3));
+  ServerFilterInstance& f4 = job.AddFilter(new Tutu(4));
+  ServerFilterInstance& f5 = job.AddFilter(new Tutu(5));
+  f2.AddInput(boost::lexical_cast<std::string>(42));
+  //f3.AddInput(boost::lexical_cast<std::string>(42));
+  //f4.AddInput(boost::lexical_cast<std::string>(42));
+  f2.ConnectNext(f3);
+  f3.ConnectNext(f4);
+  f4.ConnectNext(f5);
+
+  job.SetDescription("tutu");
+
+  bool done = false;
+  boost::thread t(Tata, &scheduler, &job, &done);
+
+
+  //scheduler.Submit(job);
+
+  IServerFilter::ListOfStrings l;
+  scheduler.SubmitAndWait(l, job);
+
+  for (IServerFilter::ListOfStrings::iterator i = l.begin(); i != l.end(); i++)
+  {
+    printf("** %s\n", i->c_str());
+  }
+
+  //Toolbox::ServerBarrier();
+  //Toolbox::USleep(3000000);
+
+  done = true;
+  t.join();
 }
