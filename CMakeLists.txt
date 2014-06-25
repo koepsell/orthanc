@@ -168,6 +168,8 @@ set(ORTHANC_UNIT_TESTS_SOURCES
   UnitTestsSources/UnitTestsMain.cpp
   UnitTestsSources/ImageProcessingTests.cpp
   UnitTestsSources/JpegLossless.cpp
+
+  UnitTestsSources/Plustache.cpp
   )
 
 
@@ -198,6 +200,7 @@ include(${CMAKE_SOURCE_DIR}/Resources/CMake/JsonCppConfiguration.cmake)
 include(${CMAKE_SOURCE_DIR}/Resources/CMake/LibPngConfiguration.cmake)
 include(${CMAKE_SOURCE_DIR}/Resources/CMake/LuaConfiguration.cmake)
 include(${CMAKE_SOURCE_DIR}/Resources/CMake/LibCurlConfiguration.cmake)
+include(${CMAKE_SOURCE_DIR}/Resources/CMake/PlustacheConfiguration.cmake)
 
 
 if (${ENABLE_SSL})
