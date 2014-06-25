@@ -271,9 +271,7 @@ namespace Orthanc
 
     ~RestApi();
 
-    virtual bool IsServedUri(const UriComponents& uri);
-
-    virtual void Handle(HttpOutput& output,
+    virtual bool Handle(HttpOutput& output,
                         HttpMethod method,
                         const UriComponents& uri,
                         const Arguments& headers,

@@ -30,62 +30,22 @@
  **/
 
 
-#include "../PrecompiledHeaders.h"
-#include "EmbeddedResourceHttpHandler.h"
+#pragma once
 
-#include "../OrthancException.h"
-#include "HttpOutput.h"
+#include "../OrthancCPlugin/OrthancCPlugin.h"
 
-#include <stdio.h>
-#include <glog/logging.h>
-
+#include <boost/noncopyable.hpp>
 
 namespace Orthanc
 {
-  EmbeddedResourceHttpHandler::EmbeddedResourceHttpHandler(
-    const std::string& baseUri,
-    EmbeddedResources::DirectoryResourceId resourceId)
+  class IPluginServiceProvider : boost::noncopyable
   {
-    Toolbox::SplitUriComponents(baseUri_, baseUri);
-    resourceId_ = resourceId;
-  }
-
-
-  bool EmbeddedResourceHttpHandler::Handle(
-    HttpOutput& output,
-    HttpMethod method,
-    const UriComponents& uri,
-    const Arguments& headers,
-    const Arguments& arguments,
-    const std::string&)
-  {
-    if (!Toolbox::IsChildUri(baseUri_, uri))
+  public:
+    virtual ~IPluginServiceProvider()
     {
-      // This URI is not served by this handler
-      return false;
     }
 
-    if (method != HttpMethod_Get)
-    {
-      output.SendMethodNotAllowedError("GET");
-      return true;
-    }
-
-    std::string resourcePath = Toolbox::FlattenUri(uri, baseUri_.size());
-    std::string contentType = Toolbox::AutodetectMimeType(resourcePath);
-
-    try
-    {
-      const void* buffer = EmbeddedResources::GetDirectoryResourceBuffer(resourceId_, resourcePath.c_str());
-      size_t size = EmbeddedResources::GetDirectoryResourceSize(resourceId_, resourcePath.c_str());
-      output.AnswerBufferWithContentType(buffer, size, contentType);
-    }
-    catch (OrthancException&)
-    {
-      LOG(WARNING) << "Unable to find HTTP resource: " << resourcePath;
-      output.SendHeader(HttpStatus_404_NotFound);
-    }
-
-    return true;
-  } 
+    virtual bool InvokeService(_OrthancPluginService service,
+                               const void* parameters) = 0;
+  };
 }

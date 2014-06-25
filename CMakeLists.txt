@@ -114,6 +114,10 @@ set(ORTHANC_CORE_SOURCES
   OrthancCppClient/Series.cpp
   OrthancCppClient/Instance.cpp
   OrthancCppClient/Patient.cpp
+
+  Plugins/Engine/SharedLibrary.cpp
+  Plugins/Engine/PluginsManager.cpp
+  Plugins/Engine/PluginsHttpHandler.cpp
   )
 
 
@@ -168,6 +172,7 @@ set(ORTHANC_UNIT_TESTS_SOURCES
   UnitTestsSources/UnitTestsMain.cpp
   UnitTestsSources/ImageProcessingTests.cpp
   UnitTestsSources/JpegLossless.cpp
+  UnitTestsSources/PluginsTests.cpp
   )
 
 
@@ -461,8 +466,15 @@ if (DOXYGEN_FOUND)
     ${CMAKE_CURRENT_BINARY_DIR}/Orthanc.doxygen
     @ONLY)
 
+  configure_file(
+    ${CMAKE_SOURCE_DIR}/Resources/OrthancPlugin.doxygen
+    ${CMAKE_CURRENT_BINARY_DIR}/OrthancPlugin.doxygen
+    @ONLY)
+
   add_custom_target(doc
     ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Orthanc.doxygen
+    COMMAND
+    ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/OrthancPlugin.doxygen
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     COMMENT "Generating internal documentation with Doxygen" VERBATIM
     )
