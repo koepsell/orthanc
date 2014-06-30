@@ -30,62 +30,42 @@
  **/
 
 
-#include "../PrecompiledHeaders.h"
-#include "EmbeddedResourceHttpHandler.h"
+#pragma once
 
-#include "../OrthancException.h"
-#include "HttpOutput.h"
+#include "SharedLibrary.h"
+#include "IPluginServiceProvider.h"
 
-#include <stdio.h>
-#include <glog/logging.h>
-
+#include <map>
+#include <list>
 
 namespace Orthanc
 {
-  EmbeddedResourceHttpHandler::EmbeddedResourceHttpHandler(
-    const std::string& baseUri,
-    EmbeddedResources::DirectoryResourceId resourceId)
+  class PluginsManager : boost::noncopyable
   {
-    Toolbox::SplitUriComponents(baseUri_, baseUri);
-    resourceId_ = resourceId;
-  }
+  private:
+    typedef std::map<std::string, SharedLibrary*>  Plugins;
 
+    OrthancPluginContext  context_;
+    Plugins  plugins_;
+    std::list<IPluginServiceProvider*> serviceProviders_;
 
-  bool EmbeddedResourceHttpHandler::Handle(
-    HttpOutput& output,
-    HttpMethod method,
-    const UriComponents& uri,
-    const Arguments& headers,
-    const Arguments& arguments,
-    const std::string&)
-  {
-    if (!Toolbox::IsChildUri(baseUri_, uri))
+    static int32_t InvokeService(OrthancPluginContext* context,
+                                 _OrthancPluginService service,
+                                 const void* parameters);
+
+  public:
+    PluginsManager();
+
+    ~PluginsManager();
+
+    void RegisterPlugin(const std::string& path);
+
+    void ScanFolderForPlugins(const std::string& path,
+                              bool isRecursive);
+
+    void RegisterServiceProvider(IPluginServiceProvider& provider)
     {
-      // This URI is not served by this handler
-      return false;
+      serviceProviders_.push_back(&provider);
     }
-
-    if (method != HttpMethod_Get)
-    {
-      output.SendMethodNotAllowedError("GET");
-      return true;
-    }
-
-    std::string resourcePath = Toolbox::FlattenUri(uri, baseUri_.size());
-    std::string contentType = Toolbox::AutodetectMimeType(resourcePath);
-
-    try
-    {
-      const void* buffer = EmbeddedResources::GetDirectoryResourceBuffer(resourceId_, resourcePath.c_str());
-      size_t size = EmbeddedResources::GetDirectoryResourceSize(resourceId_, resourcePath.c_str());
-      output.AnswerBufferWithContentType(buffer, size, contentType);
-    }
-    catch (OrthancException&)
-    {
-      LOG(WARNING) << "Unable to find HTTP resource: " << resourcePath;
-      output.SendHeader(HttpStatus_404_NotFound);
-    }
-
-    return true;
-  } 
+  };
 }
