@@ -30,62 +30,41 @@
  **/
 
 
-#include "../PrecompiledHeaders.h"
-#include "EmbeddedResourceHttpHandler.h"
+#pragma once
 
-#include "../OrthancException.h"
-#include "HttpOutput.h"
+#include "../../Core/OrthancException.h"
 
-#include <stdio.h>
-#include <glog/logging.h>
-
+#include <boost/noncopyable.hpp>
 
 namespace Orthanc
 {
-  EmbeddedResourceHttpHandler::EmbeddedResourceHttpHandler(
-    const std::string& baseUri,
-    EmbeddedResources::DirectoryResourceId resourceId)
+  class SharedLibrary : boost::noncopyable
   {
-    Toolbox::SplitUriComponents(baseUri_, baseUri);
-    resourceId_ = resourceId;
-  }
+  public:
+#if defined(_WIN32)
+    typedef FARPROC FunctionPointer;
+#else
+    typedef void* FunctionPointer;
+#endif
 
+  private:
+    std::string path_;
+    void *handle_;
 
-  bool EmbeddedResourceHttpHandler::Handle(
-    HttpOutput& output,
-    HttpMethod method,
-    const UriComponents& uri,
-    const Arguments& headers,
-    const Arguments& arguments,
-    const std::string&)
-  {
-    if (!Toolbox::IsChildUri(baseUri_, uri))
+    FunctionPointer GetFunctionInternal(const std::string& name);
+
+  public:
+    SharedLibrary(const std::string& path);
+
+    ~SharedLibrary();
+
+    const std::string& GetPath() const
     {
-      // This URI is not served by this handler
-      return false;
+      return path_;
     }
 
-    if (method != HttpMethod_Get)
-    {
-      output.SendMethodNotAllowedError("GET");
-      return true;
-    }
+    bool HasFunction(const std::string& name);
 
-    std::string resourcePath = Toolbox::FlattenUri(uri, baseUri_.size());
-    std::string contentType = Toolbox::AutodetectMimeType(resourcePath);
-
-    try
-    {
-      const void* buffer = EmbeddedResources::GetDirectoryResourceBuffer(resourceId_, resourcePath.c_str());
-      size_t size = EmbeddedResources::GetDirectoryResourceSize(resourceId_, resourcePath.c_str());
-      output.AnswerBufferWithContentType(buffer, size, contentType);
-    }
-    catch (OrthancException&)
-    {
-      LOG(WARNING) << "Unable to find HTTP resource: " << resourcePath;
-      output.SendHeader(HttpStatus_404_NotFound);
-    }
-
-    return true;
-  } 
+    FunctionPointer GetFunction(const std::string& name);
+  };
 }

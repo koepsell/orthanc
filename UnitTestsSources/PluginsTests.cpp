@@ -30,62 +30,32 @@
  **/
 
 
-#include "../PrecompiledHeaders.h"
-#include "EmbeddedResourceHttpHandler.h"
+#include "PrecompiledHeadersUnitTests.h"
+#include "gtest/gtest.h"
 
-#include "../OrthancException.h"
-#include "HttpOutput.h"
-
-#include <stdio.h>
 #include <glog/logging.h>
 
+#include "../Plugins/Engine/PluginsManager.h"
 
-namespace Orthanc
+using namespace Orthanc;
+
+TEST(SharedLibrary, Basic)
 {
-  EmbeddedResourceHttpHandler::EmbeddedResourceHttpHandler(
-    const std::string& baseUri,
-    EmbeddedResources::DirectoryResourceId resourceId)
-  {
-    Toolbox::SplitUriComponents(baseUri_, baseUri);
-    resourceId_ = resourceId;
-  }
+#if defined(_WIN32)
+  SharedLibrary l("kernel32.dll");
+  ASSERT_THROW(l.GetFunction("world"), OrthancException);
+  ASSERT_TRUE(l.GetFunction("GetVersionExW") != NULL);
+  ASSERT_TRUE(l.HasFunction("GetVersionExW"));
+  ASSERT_FALSE(l.HasFunction("world"));
 
+#elif defined(__linux)
+  SharedLibrary l("libdl.so");
+  ASSERT_THROW(l.GetFunction("world"), OrthancException);
+  ASSERT_TRUE(l.GetFunction("dlopen") != NULL);
+  ASSERT_TRUE(l.HasFunction("dlclose"));
+  ASSERT_FALSE(l.HasFunction("world"));
 
-  bool EmbeddedResourceHttpHandler::Handle(
-    HttpOutput& output,
-    HttpMethod method,
-    const UriComponents& uri,
-    const Arguments& headers,
-    const Arguments& arguments,
-    const std::string&)
-  {
-    if (!Toolbox::IsChildUri(baseUri_, uri))
-    {
-      // This URI is not served by this handler
-      return false;
-    }
-
-    if (method != HttpMethod_Get)
-    {
-      output.SendMethodNotAllowedError("GET");
-      return true;
-    }
-
-    std::string resourcePath = Toolbox::FlattenUri(uri, baseUri_.size());
-    std::string contentType = Toolbox::AutodetectMimeType(resourcePath);
-
-    try
-    {
-      const void* buffer = EmbeddedResources::GetDirectoryResourceBuffer(resourceId_, resourcePath.c_str());
-      size_t size = EmbeddedResources::GetDirectoryResourceSize(resourceId_, resourcePath.c_str());
-      output.AnswerBufferWithContentType(buffer, size, contentType);
-    }
-    catch (OrthancException&)
-    {
-      LOG(WARNING) << "Unable to find HTTP resource: " << resourcePath;
-      output.SendHeader(HttpStatus_404_NotFound);
-    }
-
-    return true;
-  } 
+#else
+#error Support your platform here
+#endif
 }

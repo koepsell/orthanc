@@ -149,21 +149,24 @@ namespace Orthanc
     } 
   }
 
-  bool RestApi::IsServedUri(const UriComponents& uri)
-  {
-    return (IsGetAccepted(uri) ||
-            IsPutAccepted(uri) ||
-            IsPostAccepted(uri) ||
-            IsDeleteAccepted(uri));
-  }
 
-  void RestApi::Handle(HttpOutput& output,
+  bool RestApi::Handle(HttpOutput& output,
                        HttpMethod method,
                        const UriComponents& uri,
                        const Arguments& headers,
                        const Arguments& getArguments,
                        const std::string& postData)
   {
+    if (!IsGetAccepted(uri) &&
+        !IsPutAccepted(uri) &&
+        !IsPostAccepted(uri) &&
+        !IsDeleteAccepted(uri))
+    {
+      // This URI is not served by this handler
+      return false;
+    }
+
+
     bool ok = false;
     RestApiOutput restOutput(output);
     HttpHandler::Arguments components;
@@ -232,6 +235,8 @@ namespace Orthanc
                 << " not allowed on: " << Toolbox::FlattenUri(uri);
       output.SendMethodNotAllowedError(GetAcceptedMethods(uri));
     }
+
+    return true;
   }
 
   void RestApi::Register(const std::string& path,

@@ -30,62 +30,55 @@
  **/
 
 
-#include "../PrecompiledHeaders.h"
-#include "EmbeddedResourceHttpHandler.h"
+#pragma once
 
-#include "../OrthancException.h"
-#include "HttpOutput.h"
+#include "PluginsManager.h"
+#include "../../Core/HttpServer/HttpHandler.h"
+#include "../../OrthancServer/ServerContext.h"
+#include "../../OrthancServer/OrthancRestApi/OrthancRestApi.h"
+#include "../OrthancCPlugin/OrthancCPlugin.h"
 
-#include <stdio.h>
-#include <glog/logging.h>
-
+#include <list>
+#include <boost/shared_ptr.hpp>
 
 namespace Orthanc
 {
-  EmbeddedResourceHttpHandler::EmbeddedResourceHttpHandler(
-    const std::string& baseUri,
-    EmbeddedResources::DirectoryResourceId resourceId)
+  class PluginsHttpHandler : public HttpHandler, public IPluginServiceProvider
   {
-    Toolbox::SplitUriComponents(baseUri_, baseUri);
-    resourceId_ = resourceId;
-  }
+  private:
+    struct PImpl;
 
+    boost::shared_ptr<PImpl> pimpl_;
 
-  bool EmbeddedResourceHttpHandler::Handle(
-    HttpOutput& output,
-    HttpMethod method,
-    const UriComponents& uri,
-    const Arguments& headers,
-    const Arguments& arguments,
-    const std::string&)
-  {
-    if (!Toolbox::IsChildUri(baseUri_, uri))
-    {
-      // This URI is not served by this handler
-      return false;
-    }
+    void RegisterRestCallback(const void* parameters);
 
-    if (method != HttpMethod_Get)
-    {
-      output.SendMethodNotAllowedError("GET");
-      return true;
-    }
+    void AnswerBuffer(const void* parameters);
 
-    std::string resourcePath = Toolbox::FlattenUri(uri, baseUri_.size());
-    std::string contentType = Toolbox::AutodetectMimeType(resourcePath);
+    void CompressAndAnswerPngImage(const void* parameters);
 
-    try
-    {
-      const void* buffer = EmbeddedResources::GetDirectoryResourceBuffer(resourceId_, resourcePath.c_str());
-      size_t size = EmbeddedResources::GetDirectoryResourceSize(resourceId_, resourcePath.c_str());
-      output.AnswerBufferWithContentType(buffer, size, contentType);
-    }
-    catch (OrthancException&)
-    {
-      LOG(WARNING) << "Unable to find HTTP resource: " << resourcePath;
-      output.SendHeader(HttpStatus_404_NotFound);
-    }
+    void GetDicomForInstance(const void* parameters);
 
-    return true;
-  } 
+    void RestApiGet(const void* parameters);
+
+    void RestApiPostPut(bool isPost, const void* parameters);
+
+    void RestApiDelete(const void* parameters);
+
+  public:
+    PluginsHttpHandler(ServerContext& context);
+
+    virtual ~PluginsHttpHandler();
+
+    virtual bool Handle(HttpOutput& output,
+                        HttpMethod method,
+                        const UriComponents& uri,
+                        const Arguments& headers,
+                        const Arguments& getArguments,
+                        const std::string& postData);
+
+    virtual bool InvokeService(_OrthancPluginService service,
+                               const void* parameters);
+
+    void SetOrthancRestApi(OrthancRestApi& restApi);
+  };
 }
