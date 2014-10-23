@@ -61,12 +61,57 @@ namespace Orthanc
     private:
       struct FileToRemove
       {
+      private:
         std::string  uuid_;
         FileContentType  type_;
 
+      public:
         FileToRemove(const FileInfo& info) : uuid_(info.GetUuid()), 
                                              type_(info.GetContentType())
         {
+        }
+
+        const std::string& GetUuid() const
+        {
+          return uuid_;
+        }
+
+        FileContentType GetContentType() const 
+        {
+          return type_;
+        }
+      };
+
+      struct ServerIndexChange
+      {
+      private:
+        ChangeType   changeType_;
+        ResourceType resourceType_;
+        std::string  publicId_;
+
+      public:
+        ServerIndexChange(ChangeType changeType,
+               ResourceType resourceType,
+               const std::string&  publicId) :
+          changeType_(changeType),
+          resourceType_(resourceType),
+          publicId_(publicId)
+        {
+        }
+
+        ChangeType  GetChangeType() const
+        {
+          return changeType_;
+        }
+
+        ResourceType  GetResourceType() const
+        {
+          return resourceType_;
+        }
+
+        const std::string&  GetPublicId() const
+        {
+          return publicId_;
         }
       };
 
@@ -75,11 +120,21 @@ namespace Orthanc
       ResourceType remainingType_;
       std::string remainingPublicId_;
       std::list<FileToRemove> pendingFilesToRemove_;
+      std::list<ServerIndexChange> pendingChanges_;
       uint64_t sizeOfFilesToRemove_;
+      bool insideTransaction_;
+
+      void Reset()
+      {
+        sizeOfFilesToRemove_ = 0;
+        hasRemainingLevel_ = false;
+        pendingFilesToRemove_.clear();
+        pendingChanges_.clear();
+      }
 
     public:
-      ServerIndexListener(ServerContext& context) : 
-        context_(context)
+      ServerIndexListener(ServerContext& context) : context_(context),
+                                                    insideTransaction_(false)      
       {
         Reset();
         assert(ResourceType_Patient < ResourceType_Study &&
@@ -87,11 +142,15 @@ namespace Orthanc
                ResourceType_Series < ResourceType_Instance);
       }
 
-      void Reset()
+      void StartTransaction()
       {
-        sizeOfFilesToRemove_ = 0;
-        hasRemainingLevel_ = false;
-        pendingFilesToRemove_.clear();
+        Reset();
+        insideTransaction_ = true;
+      }
+
+      void EndTransaction()
+      {
+        insideTransaction_ = false;
       }
 
       uint64_t GetSizeOfFilesToRemove()
@@ -101,11 +160,21 @@ namespace Orthanc
 
       void CommitFilesToRemove()
       {
-        for (std::list<FileToRemove>::iterator 
+        for (std::list<FileToRemove>::const_iterator 
                it = pendingFilesToRemove_.begin();
              it != pendingFilesToRemove_.end(); ++it)
         {
-          context_.RemoveFile(it->uuid_, it->type_);
+          context_.RemoveFile(it->GetUuid(), it->GetContentType());
+        }
+      }
+
+      void CommitChanges()
+      {
+        for (std::list<ServerIndexChange>::const_iterator 
+               it = pendingChanges_.begin(); 
+             it != pendingChanges_.end(); it++)
+        {
+          context_.SignalChange(it->GetChangeType(), it->GetResourceType(), it->GetPublicId());
         }
       }
 
@@ -135,6 +204,23 @@ namespace Orthanc
         assert(Toolbox::IsUuid(info.GetUuid()));
         pendingFilesToRemove_.push_back(FileToRemove(info));
         sizeOfFilesToRemove_ += info.GetCompressedSize();
+      }
+
+      virtual void SignalChange(ChangeType changeType,
+                                ResourceType resourceType,
+                                const std::string& publicId)
+      {
+        LOG(INFO) << "Change related to resource " << publicId << " of type " 
+                  << EnumerationToString(resourceType) << ": " << EnumerationToString(changeType);
+
+        if (insideTransaction_)
+        {
+          pendingChanges_.push_back(ServerIndexChange(changeType, resourceType, publicId));
+        }
+        else
+        {
+          context_.SignalChange(changeType, resourceType, publicId);
+        }
       }
 
       bool HasRemainingLevel() const
@@ -171,9 +257,15 @@ namespace Orthanc
     {
       assert(index_.currentStorageSize_ == index_.db_->GetTotalCompressedSize());
 
-      index_.listener_->Reset();
       transaction_.reset(index_.db_->StartTransaction());
       transaction_->Begin();
+
+      index_.listener_->StartTransaction();
+    }
+
+    ~Transaction()
+    {
+      index_.listener_->EndTransaction();
     }
 
     void Commit(uint64_t sizeOfAddedFiles)
@@ -194,22 +286,31 @@ namespace Orthanc
 
         assert(index_.currentStorageSize_ == index_.db_->GetTotalCompressedSize());
 
+        // Send all the pending changes to the Orthanc plugins
+        index_.listener_->CommitChanges();
+
         isCommitted_ = true;
       }
     }
   };
 
 
-  struct ServerIndex::UnstableResourcePayload
+  class ServerIndex::UnstableResourcePayload
   {
-    Orthanc::ResourceType type_;
+  private:
+    ResourceType type_;
+    std::string publicId_;
     boost::posix_time::ptime time_;
 
-    UnstableResourcePayload() : type_(Orthanc::ResourceType_Instance)
+  public:
+    UnstableResourcePayload() : type_(ResourceType_Instance)
     {
     }
 
-    UnstableResourcePayload(Orthanc::ResourceType type) : type_(type)
+    UnstableResourcePayload(Orthanc::ResourceType type,
+                            const std::string& publicId) : 
+      type_(type),
+      publicId_(publicId)
     {
       time_ = boost::posix_time::second_clock::local_time();
     }
@@ -217,6 +318,16 @@ namespace Orthanc
     unsigned int GetAge() const
     {
       return (boost::posix_time::second_clock::local_time() - time_).total_seconds();
+    }
+
+    ResourceType GetResourceType() const
+    {
+      return type_;
+    }
+    
+    const std::string& GetPublicId() const
+    {
+      return publicId_;
     }
   };
 
@@ -226,7 +337,6 @@ namespace Orthanc
                                    ResourceType expectedType)
   {
     boost::mutex::scoped_lock lock(mutex_);
-    listener_->Reset();
 
     Transaction t(*this);
 
@@ -403,7 +513,6 @@ namespace Orthanc
                                  const MetadataMap& metadata)
   {
     boost::mutex::scoped_lock lock(mutex_);
-    listener_->Reset();
 
     instanceMetadata.clear();
 
@@ -597,13 +706,13 @@ namespace Orthanc
       SeriesStatus seriesStatus = GetSeriesStatus(series);
       if (seriesStatus == SeriesStatus_Complete)
       {
-        db_->LogChange(ChangeType_CompletedSeries, series, ResourceType_Series);
+        db_->LogChange(ChangeType_CompletedSeries, series, ResourceType_Series, hasher.HashSeries());
       }
 
       // Mark the parent resources of this instance as unstable
-      MarkAsUnstable(series, ResourceType_Series);
-      MarkAsUnstable(study, ResourceType_Study);
-      MarkAsUnstable(patient, ResourceType_Patient);
+      MarkAsUnstable(series, ResourceType_Series, hasher.HashSeries());
+      MarkAsUnstable(study, ResourceType_Study, hasher.HashStudy());
+      MarkAsUnstable(patient, ResourceType_Patient, hasher.HashPatient());
 
       t.Commit(instanceSize);
 
@@ -1386,7 +1495,7 @@ namespace Orthanc
       throw OrthancException(ErrorCode_UnknownResource);
     }
 
-    db_->LogChange(changeType, id, type);
+    db_->LogChange(changeType, id, type, publicId);
 
     transaction->Commit();
   }
@@ -1583,18 +1692,18 @@ namespace Orthanc
         // Ensure that the resource is still existing before logging the change
         if (that->db_->IsExistingResource(id))
         {
-          switch (payload.type_)
+          switch (payload.GetResourceType())
           {
-            case Orthanc::ResourceType_Patient:
-              that->db_->LogChange(ChangeType_StablePatient, id, ResourceType_Patient);
+            case ResourceType_Patient:
+              that->db_->LogChange(ChangeType_StablePatient, id, ResourceType_Patient, payload.GetPublicId());
               break;
 
-            case Orthanc::ResourceType_Study:
-              that->db_->LogChange(ChangeType_StableStudy, id, ResourceType_Study);
+            case ResourceType_Study:
+              that->db_->LogChange(ChangeType_StableStudy, id, ResourceType_Study, payload.GetPublicId());
               break;
 
-            case Orthanc::ResourceType_Series:
-              that->db_->LogChange(ChangeType_StableSeries, id, ResourceType_Series);
+            case ResourceType_Series:
+              that->db_->LogChange(ChangeType_StableSeries, id, ResourceType_Series, payload.GetPublicId());
               break;
 
             default:
@@ -1611,7 +1720,8 @@ namespace Orthanc
   
 
   void ServerIndex::MarkAsUnstable(int64_t id,
-                                   Orthanc::ResourceType type)
+                                   Orthanc::ResourceType type,
+                                   const std::string& publicId)
   {
     // WARNING: Before calling this method, "mutex_" must be locked.
 
@@ -1619,23 +1729,26 @@ namespace Orthanc
            type == Orthanc::ResourceType_Study ||
            type == Orthanc::ResourceType_Series);
 
-    unstableResources_.AddOrMakeMostRecent(id, type);
+    UnstableResourcePayload payload(type, publicId);
+    unstableResources_.AddOrMakeMostRecent(id, payload);
     //LOG(INFO) << "Unstable resource: " << EnumerationToString(type) << " " << id;
+
+    db_->LogChange(ChangeType_NewChildInstance, id, type, publicId);
   }
 
 
 
-  void ServerIndex::LookupTagValue(std::list<std::string>& result,
-                                   DicomTag tag,
-                                   const std::string& value,
-                                   ResourceType type)
+  void ServerIndex::LookupIdentifier(std::list<std::string>& result,
+                                     const DicomTag& tag,
+                                     const std::string& value,
+                                     ResourceType type)
   {
     result.clear();
 
     boost::mutex::scoped_lock lock(mutex_);
 
     std::list<int64_t> id;
-    db_->LookupTagValue(id, tag, value);
+    db_->LookupIdentifier(id, tag, value);
 
     for (std::list<int64_t>::const_iterator 
            it = id.begin(); it != id.end(); ++it)
@@ -1648,16 +1761,16 @@ namespace Orthanc
   }
 
 
-  void ServerIndex::LookupTagValue(std::list<std::string>& result,
-                                   DicomTag tag,
-                                   const std::string& value)
+  void ServerIndex::LookupIdentifier(std::list<std::string>& result,
+                                     const DicomTag& tag,
+                                     const std::string& value)
   {
     result.clear();
 
     boost::mutex::scoped_lock lock(mutex_);
 
     std::list<int64_t> id;
-    db_->LookupTagValue(id, tag, value);
+    db_->LookupIdentifier(id, tag, value);
 
     for (std::list<int64_t>::const_iterator 
            it = id.begin(); it != id.end(); ++it)
@@ -1667,15 +1780,15 @@ namespace Orthanc
   }
 
 
-  void ServerIndex::LookupTagValue(std::list< std::pair<ResourceType, std::string> >& result,
-                                   const std::string& value)
+  void ServerIndex::LookupIdentifier(std::list< std::pair<ResourceType, std::string> >& result,
+                                     const std::string& value)
   {
     result.clear();
 
     boost::mutex::scoped_lock lock(mutex_);
 
     std::list<int64_t> id;
-    db_->LookupTagValue(id, value);
+    db_->LookupIdentifier(id, value);
 
     for (std::list<int64_t>::const_iterator 
            it = id.begin(); it != id.end(); ++it)
@@ -1736,7 +1849,6 @@ namespace Orthanc
                                      FileContentType type)
   {
     boost::mutex::scoped_lock lock(mutex_);
-    listener_->Reset();
 
     Transaction t(*this);
 
@@ -1780,6 +1892,4 @@ namespace Orthanc
 
     return true;
   }
-
-
 }

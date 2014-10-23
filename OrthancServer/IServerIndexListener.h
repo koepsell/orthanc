@@ -48,5 +48,9 @@ namespace Orthanc
                                          const std::string& publicId) = 0;
 
     virtual void SignalFileDeleted(const FileInfo& info) = 0;
+
+    virtual void SignalChange(ChangeType changeType,
+                              ResourceType resourceType,
+                              const std::string& publicId) = 0;
   };
 }
